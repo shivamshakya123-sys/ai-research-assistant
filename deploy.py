@@ -97,30 +97,14 @@ class GraphState(TypedDict):
 
 def router_node(state):
 
-    q = state["question"]
+    question = state["question"]
 
-    prompt = f"""
-Decide if this requires document retrieval.
+    docs = retriever.invoke(question)
 
-Return only one word:
-
-rag
-or
-llm
-
-Question: {q}
-"""
-
-    r = llm.invoke(prompt)
-
-    route = r.content.strip().lower()
-
-    if "rag" in route:
-        route = "rag"
+    if len(docs) > 0:
+        return {"route": "rag"}
     else:
-        route = "llm"
-
-    return {"route": route}
+        return {"route": "llm"}
 
 
 # ---------------- RETRIEVAL ----------------
