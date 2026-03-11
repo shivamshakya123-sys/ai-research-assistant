@@ -11,12 +11,11 @@ st.title("🤖 AI Research Assistant")
 st.write("Ask questions about your document database.")
 
 
-# UI message memory
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 
-# show previous UI messages
+# display UI history
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
@@ -35,19 +34,22 @@ if user_question:
     with st.chat_message("user"):
         st.write(user_question)
 
-    # reload full history from DB
+    # load full DB history
     history = load_history()
+
+    # include current question in history
+    history_context = history + [f"User: {user_question}"]
 
     with st.spinner("Thinking..."):
 
         result = graph.invoke({
             "question": user_question,
-            "chat_history": history
+            "chat_history": history_context
         })
 
     answer = result["answer"]
 
-    # save messages to database
+    # save messages
     save_message("User", user_question)
     save_message("Assistant", answer)
 

@@ -8,9 +8,9 @@ from langchain_community.vectorstores import Chroma
 from langgraph.graph import StateGraph, END
 
 
-# ------------------------
+# -------------------------
 # DATABASE MEMORY
-# ------------------------
+# -------------------------
 
 def init_memory():
     conn = sqlite3.connect("chat_memory.db")
@@ -26,7 +26,6 @@ def init_memory():
 
     conn.commit()
     conn.close()
-
 
 init_memory()
 
@@ -63,9 +62,9 @@ def load_history():
     return history
 
 
-# ------------------------
+# -------------------------
 # LLM
-# ------------------------
+# -------------------------
 
 llm = ChatMistralAI(
     model="devstral-latest",
@@ -73,9 +72,9 @@ llm = ChatMistralAI(
 )
 
 
-# ------------------------
+# -------------------------
 # EMBEDDINGS
-# ------------------------
+# -------------------------
 
 embed_model = MistralAIEmbeddings(
     model="mistral-embed",
@@ -83,9 +82,9 @@ embed_model = MistralAIEmbeddings(
 )
 
 
-# ------------------------
+# -------------------------
 # VECTOR DATABASE
-# ------------------------
+# -------------------------
 
 @st.cache_resource
 def load_vectorstore():
@@ -100,9 +99,9 @@ vectorstore = load_vectorstore()
 retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
 
 
-# ------------------------
+# -------------------------
 # GRAPH STATE
-# ------------------------
+# -------------------------
 
 class GraphState(TypedDict):
     question: str
@@ -112,9 +111,9 @@ class GraphState(TypedDict):
     route: str
 
 
-# ------------------------
+# -------------------------
 # MEMORY NODE
-# ------------------------
+# -------------------------
 
 def memory_node(state):
 
@@ -123,9 +122,9 @@ def memory_node(state):
     return {"chat_history": history}
 
 
-# ------------------------
+# -------------------------
 # ROUTER NODE
-# ------------------------
+# -------------------------
 
 def router_node(state):
 
@@ -134,7 +133,7 @@ def router_node(state):
     prompt = f"""
 Decide if the question requires document retrieval.
 
-Return only one word:
+Return ONLY one word:
 
 rag
 or
@@ -155,9 +154,9 @@ Question: {question}
     return {"route": route}
 
 
-# ------------------------
+# -------------------------
 # RETRIEVAL NODE
-# ------------------------
+# -------------------------
 
 def retrieval_node(state):
 
@@ -170,9 +169,9 @@ def retrieval_node(state):
     return {"documents": documents}
 
 
-# ------------------------
+# -------------------------
 # ANSWER NODE
-# ------------------------
+# -------------------------
 
 def answer_node(state):
 
@@ -181,26 +180,23 @@ def answer_node(state):
     context = "\n".join(state.get("documents", []))
 
     prompt = f"""
-You are an AI research assistant.
+You are an AI assistant that remembers conversation history.
 
 Conversation history:
 {history}
 
-The user may ask about previous questions.
-If the user asks:
-- what were my queries
-- what was question 2
-- what did I ask earlier
-
-You MUST look at the conversation history and answer correctly.
+Instructions:
+If the user asks about previous questions or information
+(for example: "what is my name", "what did I ask", "what were my queries"),
+you MUST answer using the conversation history.
 
 Document context:
 {context}
 
-User question:
+Current user question:
 {question}
 
-Answer clearly.
+Answer clearly using the conversation history if relevant.
 """
 
     response = llm.invoke(prompt)
@@ -211,9 +207,9 @@ Answer clearly.
     }
 
 
-# ------------------------
+# -------------------------
 # LLM NODE
-# ------------------------
+# -------------------------
 
 def llm_node(state):
 
@@ -227,9 +223,9 @@ def llm_node(state):
     }
 
 
-# ------------------------
+# -------------------------
 # ROUTE DECISION
-# ------------------------
+# -------------------------
 
 def route_decision(state):
 
@@ -239,9 +235,9 @@ def route_decision(state):
         return "llm"
 
 
-# ------------------------
+# -------------------------
 # BUILD GRAPH
-# ------------------------
+# -------------------------
 
 builder = StateGraph(GraphState)
 
@@ -268,10 +264,6 @@ builder.add_edge("retrieval", "answer")
 builder.add_edge("answer", END)
 builder.add_edge("llm", END)
 
-
-# ------------------------
-# COMPILE GRAPH
-# ------------------------
 
 @st.cache_resource
 def load_graph():
