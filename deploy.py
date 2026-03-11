@@ -8,15 +8,13 @@ from langchain_community.vectorstores import Chroma
 from langgraph.graph import StateGraph, END
 
 
-# -------------------------
-# DATABASE MEMORY
-# -------------------------
+# ---------------- DATABASE ----------------
 
 def init_memory():
     conn = sqlite3.connect("chat_memory.db")
-    cursor = conn.cursor()
+    cur = conn.cursor()
 
-    cursor.execute("""
+    cur.execute("""
     CREATE TABLE IF NOT EXISTS conversations (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         role TEXT,
@@ -32,10 +30,10 @@ init_memory()
 
 def save_message(role, message):
     conn = sqlite3.connect("chat_memory.db")
-    cursor = conn.cursor()
+    cur = conn.cursor()
 
-    cursor.execute(
-        "INSERT INTO conversations (role, message) VALUES (?, ?)",
+    cur.execute(
+        "INSERT INTO conversations (role, message) VALUES (?,?)",
         (role, message)
     )
 
@@ -45,26 +43,17 @@ def save_message(role, message):
 
 def load_history():
     conn = sqlite3.connect("chat_memory.db")
-    cursor = conn.cursor()
+    cur = conn.cursor()
 
-    cursor.execute(
-        "SELECT role, message FROM conversations ORDER BY id"
-    )
+    cur.execute("SELECT role,message FROM conversations ORDER BY id")
 
-    rows = cursor.fetchall()
+    rows = cur.fetchall()
     conn.close()
 
-    history = []
-
-    for role, msg in rows:
-        history.append(f"{role}: {msg}")
-
-    return history
+    return rows
 
 
-# -------------------------
-# LLM
-# -------------------------
+# ---------------- LLM ----------------
 
 llm = ChatMistralAI(
     model="devstral-latest",
@@ -72,9 +61,7 @@ llm = ChatMistralAI(
 )
 
 
-# -------------------------
-# EMBEDDINGS
-# -------------------------
+# ---------------- EMBEDDINGS ----------------
 
 embed_model = MistralAIEmbeddings(
     model="mistral-embed",
@@ -82,9 +69,7 @@ embed_model = MistralAIEmbeddings(
 )
 
 
-# -------------------------
-# VECTOR DATABASE
-# -------------------------
+# ---------------- VECTOR STORE ----------------
 
 @st.cache_resource
 def load_vectorstore():
@@ -93,58 +78,42 @@ def load_vectorstore():
         embedding_function=embed_model
     )
 
-
 vectorstore = load_vectorstore()
 
 retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
 
 
-# -------------------------
-# GRAPH STATE
-# -------------------------
+# ---------------- GRAPH STATE ----------------
 
 class GraphState(TypedDict):
     question: str
-    chat_history: List[str]
+    chat_history: List
     documents: List[str]
     answer: str
     route: str
 
 
-# -------------------------
-# MEMORY NODE
-# -------------------------
-
-def memory_node(state):
-
-    history = state.get("chat_history", [])
-
-    return {"chat_history": history}
-
-
-# -------------------------
-# ROUTER NODE
-# -------------------------
+# ---------------- ROUTER ----------------
 
 def router_node(state):
 
-    question = state["question"]
+    q = state["question"]
 
     prompt = f"""
-Decide if the question requires document retrieval.
+Decide if this requires document retrieval.
 
-Return ONLY one word:
+Return only one word:
 
 rag
 or
 llm
 
-Question: {question}
+Question: {q}
 """
 
-    response = llm.invoke(prompt)
+    r = llm.invoke(prompt)
 
-    route = response.content.strip().lower()
+    route = r.content.strip().lower()
 
     if "rag" in route:
         route = "rag"
@@ -154,78 +123,94 @@ Question: {question}
     return {"route": route}
 
 
-# -------------------------
-# RETRIEVAL NODE
-# -------------------------
+# ---------------- RETRIEVAL ----------------
 
 def retrieval_node(state):
 
-    question = state["question"]
+    q = state["question"]
 
-    docs = retriever.invoke(question)
+    docs = retriever.invoke(q)
 
-    documents = [doc.page_content for doc in docs]
+    documents = [d.page_content for d in docs]
 
     return {"documents": documents}
 
 
-# -------------------------
-# ANSWER NODE
-# -------------------------
+# ---------------- ANSWER NODE ----------------
 
 def answer_node(state):
 
     question = state["question"]
-    history = "\n".join(state.get("chat_history", []))
-    context = "\n".join(state.get("documents", []))
+    docs = state.get("documents", [])
 
-    prompt = f"""
-You are an AI assistant that remembers conversation history.
+    history_rows = load_history()
 
-Conversation history:
-{history}
+    messages = [
+        {
+            "role": "system",
+            "content":
+            "You remember conversation history. Use it when answering. just use conversation history when you need answering the question like what is , what was , or what i asked use converstation history never answer only 'dont know' when you dont know the answer!"
+        }
+    ]
 
-Instructions:
-If the user asks about previous questions or information
-(for example: "what is my name", "what did I ask", "what were my queries"),
-you MUST answer using the conversation history.
+    for role, msg in history_rows:
 
-Document context:
-{context}
+        if role.lower() == "user":
+            messages.append({"role": "user", "content": msg})
 
-Current user question:
-{question}
+        else:
+            messages.append({"role": "assistant", "content": msg})
 
-Answer clearly using the conversation history if relevant.
-"""
+    context = "\n".join(docs)
 
-    response = llm.invoke(prompt)
+    messages.append({
+        "role": "user",
+        "content": f"{question}\n\nContext:\n{context}"
+    })
+
+    response = llm.invoke(messages)
 
     return {
         "answer": response.content,
-        "documents": state.get("documents", [])
+        "documents": docs
     }
 
 
-# -------------------------
-# LLM NODE
-# -------------------------
+# ---------------- SIMPLE LLM ----------------
 
 def llm_node(state):
 
-    question = state["question"]
+    q = state["question"]
 
-    response = llm.invoke(question)
+    history_rows = load_history()
+
+    messages = [
+        {
+            "role": "system",
+            "content":
+            "You remember conversation history."
+        }
+    ]
+
+    for role, msg in history_rows:
+
+        if role.lower() == "user":
+            messages.append({"role": "user", "content": msg})
+
+        else:
+            messages.append({"role": "assistant", "content": msg})
+
+    messages.append({"role": "user", "content": q})
+
+    r = llm.invoke(messages)
 
     return {
-        "answer": response.content,
+        "answer": r.content,
         "documents": []
     }
 
 
-# -------------------------
-# ROUTE DECISION
-# -------------------------
+# ---------------- ROUTE ----------------
 
 def route_decision(state):
 
@@ -235,21 +220,16 @@ def route_decision(state):
         return "llm"
 
 
-# -------------------------
-# BUILD GRAPH
-# -------------------------
+# ---------------- GRAPH ----------------
 
 builder = StateGraph(GraphState)
 
-builder.add_node("memory", memory_node)
 builder.add_node("router", router_node)
 builder.add_node("retrieval", retrieval_node)
 builder.add_node("answer", answer_node)
 builder.add_node("llm", llm_node)
 
-builder.set_entry_point("memory")
-
-builder.add_edge("memory", "router")
+builder.set_entry_point("router")
 
 builder.add_conditional_edges(
     "router",
@@ -268,6 +248,5 @@ builder.add_edge("llm", END)
 @st.cache_resource
 def load_graph():
     return builder.compile()
-
 
 graph = load_graph()
