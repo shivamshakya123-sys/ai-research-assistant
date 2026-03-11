@@ -1,5 +1,5 @@
 import streamlit as st
-from deploy import graph
+from deploy import graph, save_message, load_history
 
 st.set_page_config(
     page_title="AI Research Assistant",
@@ -10,24 +10,38 @@ st.set_page_config(
 st.title("🤖 AI Research Assistant")
 st.write("Ask questions about your document database.")
 
-# session state
+# Load persistent history
 if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
+    st.session_state.chat_history = load_history()
 
+# UI message history
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# display previous messages
+    # rebuild UI messages from stored history
+    for item in st.session_state.chat_history:
+        if item.startswith("User:"):
+            st.session_state.messages.append({
+                "role": "user",
+                "content": item.replace("User:", "").strip()
+            })
+        elif item.startswith("Assistant:"):
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": item.replace("Assistant:", "").strip()
+            })
+
+# Display previous messages
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
 
-# input box
+# Chat input
 user_question = st.chat_input("Ask a question")
 
 if user_question:
 
-    # show user message
+    # Show user message
     st.session_state.messages.append(
         {"role": "user", "content": user_question}
     )
@@ -35,7 +49,7 @@ if user_question:
     with st.chat_message("user"):
         st.write(user_question)
 
-    # run graph
+    # Run LangGraph
     with st.spinner("Thinking..."):
         result = graph.invoke({
             "question": user_question,
@@ -44,15 +58,20 @@ if user_question:
 
     answer = result["answer"]
 
-    # update memory
-    st.session_state.chat_history.append(user_question)
+    # Save to persistent database
+    save_message("User", user_question)
+    save_message("Assistant", answer)
 
-    # store assistant message
+    # Update session memory
+    st.session_state.chat_history.append(f"User: {user_question}")
+    st.session_state.chat_history.append(f"Assistant: {answer}")
+
+    # Store assistant message
     st.session_state.messages.append(
         {"role": "assistant", "content": answer}
     )
 
-    # show assistant message
+    # Show assistant message
     with st.chat_message("assistant"):
         st.write(answer)
 
