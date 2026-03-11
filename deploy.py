@@ -184,7 +184,7 @@ def llm_node(state):
         {
             "role": "system",
             "content":
-            "You remember conversation history.And answer in a clear and focus on user prompt based on that answer!"
+            "You remember conversation history.And answer in a clear and focus on user prompt based on that answer!. and only retrieve when user say you to retrive from database unless provide information based on general knowledge do not use retrival blindly only go to database when you needed it ! and if user say something to you answer based on what you think to be answered do not search for database only search for database when user says to you to search!"
         }
     ]
 
