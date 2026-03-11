@@ -1,9 +1,17 @@
-from langchain_mistralai import ChatMistralAI
 import os
-from langchain_mistralai import MistralAIEmbeddings
+import sqlite3
 import streamlit as st
 
-import sqlite3
+from typing import TypedDict, List
+
+from langchain_mistralai import ChatMistralAI, MistralAIEmbeddings
+from langchain_community.vectorstores import Chroma
+from langgraph.graph import StateGraph, END
+
+
+# -----------------------
+# DATABASE MEMORY
+# -----------------------
 
 def init_memory():
     conn = sqlite3.connect("chat_memory.db")
@@ -20,9 +28,8 @@ def init_memory():
     conn.commit()
     conn.close()
 
+
 init_memory()
-
-
 
 
 def save_message(role, message):
@@ -42,34 +49,32 @@ def load_history():
     conn = sqlite3.connect("chat_memory.db")
     cursor = conn.cursor()
 
-    cursor.execute("SELECT role, message FROM conversations")
+    cursor.execute("SELECT role, message FROM conversations ORDER BY id")
 
     rows = cursor.fetchall()
     conn.close()
 
     history = []
+
     for role, msg in rows:
         history.append(f"{role}: {msg}")
 
     return history
 
 
+# -----------------------
+# LLM
+# -----------------------
 
-
-
-# creating llm
 llm = ChatMistralAI(
     model="devstral-latest",
     mistral_api_key=os.getenv("MISTRAL_API_KEY")
 )
 
 
-
-
-
-
-
-from langchain_mistralai import MistralAIEmbeddings
+# -----------------------
+# EMBEDDINGS
+# -----------------------
 
 embed_model = MistralAIEmbeddings(
     model="mistral-embed",
@@ -77,12 +82,9 @@ embed_model = MistralAIEmbeddings(
 )
 
 
-
-
-
-
-# retriving from the database DATA
-from langchain_community.vectorstores import Chroma
+# -----------------------
+# VECTOR DATABASE
+# -----------------------
 
 @st.cache_resource
 def load_vectorstore():
@@ -91,14 +93,15 @@ def load_vectorstore():
         embedding_function=embed_model
     )
 
+
 vectorstore = load_vectorstore()
 
-retriever = vectorstore.as_retriever(search_kwargs={"k":5})
+retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
 
 
-
-# graphstate:
-from typing import TypedDict, List
+# -----------------------
+# GRAPH STATE
+# -----------------------
 
 class GraphState(TypedDict):
     question: str
@@ -106,11 +109,12 @@ class GraphState(TypedDict):
     documents: List[str]
     answer: str
     route: str
-    
-    
-    
-    
-# this will store previous messages:
+
+
+# -----------------------
+# MEMORY NODE
+# -----------------------
+
 def memory_node(state):
 
     history = state.get("chat_history", [])
@@ -118,17 +122,10 @@ def memory_node(state):
     return {"chat_history": history}
 
 
+# -----------------------
+# ROUTER NODE
+# -----------------------
 
-
-
-
-
-
-
-
-
-
-# router node
 def router_node(state):
 
     question = state["question"]
@@ -136,20 +133,30 @@ def router_node(state):
     prompt = f"""
 Decide if the question requires searching a document database.
 
-Return only:
-select only one that requires:-
-1.rag
-2.llm
+Return only one word:
+rag
+or
+llm
 
 Question: {question}
 """
 
     response = llm.invoke(prompt)
 
-    return {"route": response.content.strip().lower()}
+    route = response.content.strip().lower()
+
+    if "rag" in route:
+        route = "rag"
+    else:
+        route = "llm"
+
+    return {"route": route}
 
 
-# retrivel tool
+# -----------------------
+# RETRIEVAL NODE
+# -----------------------
+
 def retrieval_node(state):
 
     question = state["question"]
@@ -161,11 +168,10 @@ def retrieval_node(state):
     return {"documents": documents}
 
 
+# -----------------------
+# ANSWER NODE
+# -----------------------
 
-
-
-
-# answer generation
 def answer_node(state):
 
     question = state["question"]
@@ -173,32 +179,32 @@ def answer_node(state):
     history = "\n".join(state.get("chat_history", []))
 
     prompt = f"""
-    You are an AI research assistant.
+You are an AI research assistant.
 
-    Conversation so far:
-    {history}
+Conversation so far:
+{history}
 
-    Context from documents:
-    {context}
+Context from documents:
+{context}
 
-    User question:
-    {question}
+User question:
+{question}
 
-    Answer the user while considering the previous conversation.
-    """
+Answer the user while considering the previous conversation.
+"""
 
     response = llm.invoke(prompt)
 
     return {
-    "answer": response.content,
-    "documents": state.get("documents", [])
-}
+        "answer": response.content,
+        "documents": state.get("documents", [])
+    }
 
 
+# -----------------------
+# LLM NODE
+# -----------------------
 
-
-
-# llm
 def llm_node(state):
 
     question = state["question"]
@@ -211,9 +217,9 @@ def llm_node(state):
     }
 
 
-
-
-
+# -----------------------
+# ROUTE DECISION
+# -----------------------
 
 def route_decision(state):
 
@@ -221,11 +227,11 @@ def route_decision(state):
         return "retrieval"
     else:
         return "llm"
-    
-    
 
-# builing the graph
-from langgraph.graph import StateGraph, END
+
+# -----------------------
+# BUILD GRAPH
+# -----------------------
 
 builder = StateGraph(GraphState)
 
@@ -247,15 +253,19 @@ builder.add_conditional_edges(
         "llm": "llm"
     }
 )
+
 builder.add_edge("retrieval", "answer")
 builder.add_edge("answer", END)
-builder.add_edge("llm",END)
+builder.add_edge("llm", END)
 
 
-
+# -----------------------
+# COMPILE GRAPH
+# -----------------------
 
 @st.cache_resource
 def load_graph():
     return builder.compile()
+
 
 graph = load_graph()
