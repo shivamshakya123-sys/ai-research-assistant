@@ -3,6 +3,59 @@ import os
 from langchain_mistralai import MistralAIEmbeddings
 import streamlit as st
 
+import sqlite3
+
+def init_memory():
+    conn = sqlite3.connect("chat_memory.db")
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS conversations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        role TEXT,
+        message TEXT
+    )
+    """)
+
+    conn.commit()
+    conn.close()
+
+init_memory()
+
+
+
+
+def save_message(role, message):
+    conn = sqlite3.connect("chat_memory.db")
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "INSERT INTO conversations (role, message) VALUES (?, ?)",
+        (role, message)
+    )
+
+    conn.commit()
+    conn.close()
+
+
+def load_history():
+    conn = sqlite3.connect("chat_memory.db")
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT role, message FROM conversations")
+
+    rows = cursor.fetchall()
+    conn.close()
+
+    history = []
+    for role, msg in rows:
+        history.append(f"{role}: {msg}")
+
+    return history
+
+
+
+
 
 # creating llm
 llm = ChatMistralAI(
@@ -61,9 +114,6 @@ class GraphState(TypedDict):
 def memory_node(state):
 
     history = state.get("chat_history", [])
-    question = state["question"]
-
-    history.append(question)
 
     return {"chat_history": history}
 
@@ -123,17 +173,19 @@ def answer_node(state):
     history = "\n".join(state.get("chat_history", []))
 
     prompt = f"""
-Conversation History:
-{history}
+    You are an AI research assistant.
 
-Context:
-{context}
+    Conversation so far:
+    {history}
 
-Question:
-{question}
+    Context from documents:
+    {context}
 
-Answer clearly and cite ideas from the context when possible.
-"""
+    User question:
+    {question}
+
+    Answer the user while considering the previous conversation.
+    """
 
     response = llm.invoke(prompt)
 
