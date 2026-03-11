@@ -87,7 +87,6 @@ retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
 
 class GraphState(TypedDict):
     question: str
-    chat_history: List
     documents: List[str]
     answer: str
     route: str
@@ -97,35 +96,49 @@ class GraphState(TypedDict):
 
 def router_node(state):
 
-    question = state["question"]
+    question = state["question"].lower()
 
-    docs = retriever.invoke(question)
+    retrieval_keywords = [
+        "pdf",
+        "document",
+        "paper",
+        "file",
+        "database",
+        "from my data",
+        "from the docs",
+        "search my data",
+        "search database"
+    ]
 
-    if len(docs) > 0:
-        return {"route": "rag"}
+    if any(word in question for word in retrieval_keywords):
+        route = "rag"
     else:
-        return {"route": "llm"}
+        route = "llm"
+
+    return {"route": route}
 
 
 # ---------------- RETRIEVAL ----------------
 
 def retrieval_node(state):
 
-    q = state["question"]
+    question = state["question"]
 
-    docs = retriever.invoke(q)
+    docs = retriever.invoke(question)
 
     documents = [d.page_content for d in docs]
 
     return {"documents": documents}
 
 
-# ---------------- ANSWER NODE ----------------
+# ---------------- ANSWER NODE (RAG) ----------------
 
 def answer_node(state):
 
     question = state["question"]
     docs = state.get("documents", [])
+
+    context = "\n\n".join(docs)
 
     history_rows = load_history()
 
@@ -134,18 +147,14 @@ def answer_node(state):
             "role": "system",
             "content":
             """
-            if user didnot provide name do not use any name. 
-            if user provide you any name after converstion ends forgot it
-            if user provides you any critical information and say you to store it then store it in database!
-            do not reveal any sensitive information from database 
-            again i am saying you only retrive from database when user ask you!
-            if user ask anything first answer through general knowledge if you need retreval then use database.
-            do not ever look for retrival if user ask general knowlege and you can answer them .
-            only go to retrival to database when user say pdf , or based on database then go to database and retrieve from there.
-            do not genrate strange answer .
-            focus on solely on user intention what he/she wants.
-            note: only retrieve when user say you to retrieve 
-            """
+You are an AI assistant.
+
+If context is provided, it comes from the user's uploaded files.
+Use the context to answer the question.
+
+Do not mention retrieval or sources.
+Just answer naturally.
+"""
         }
     ]
 
@@ -153,22 +162,24 @@ def answer_node(state):
 
         if role.lower() == "user":
             messages.append({"role": "user", "content": msg})
-
         else:
             messages.append({"role": "assistant", "content": msg})
 
-    context = "\n".join(docs)
-
     messages.append({
         "role": "user",
-        "content": f"{question}\n\nContext:\n{context}"
+        "content": f"""
+Context:
+{context}
+
+Question:
+{question}
+"""
     })
 
     response = llm.invoke(messages)
 
     return {
-        "answer": response.content,
-        "documents": docs
+        "answer": response.content
     }
 
 
@@ -176,7 +187,7 @@ def answer_node(state):
 
 def llm_node(state):
 
-    q = state["question"]
+    question = state["question"]
 
     history_rows = load_history()
 
@@ -184,7 +195,13 @@ def llm_node(state):
         {
             "role": "system",
             "content":
-            "You remember conversation history.And answer in a clear and focus on user prompt based on that answer!. and only retrieve when user say you to retrive from database unless provide information based on general knowledge do not use retrival blindly only go to database when you needed it ! and if user say something to you answer based on what you think to be answered do not search for database only search for database when user says to you to search!"
+            """
+You are a helpful AI assistant.
+
+Use conversation history to answer naturally.
+Only rely on general knowledge.
+Do not access any document database unless explicitly requested.
+"""
         }
     ]
 
@@ -192,21 +209,19 @@ def llm_node(state):
 
         if role.lower() == "user":
             messages.append({"role": "user", "content": msg})
-
         else:
             messages.append({"role": "assistant", "content": msg})
 
-    messages.append({"role": "user", "content": q})
+    messages.append({"role": "user", "content": question})
 
-    r = llm.invoke(messages)
+    response = llm.invoke(messages)
 
     return {
-        "answer": r.content,
-        "documents": []
+        "answer": response.content
     }
 
 
-# ---------------- ROUTE ----------------
+# ---------------- ROUTE DECISION ----------------
 
 def route_decision(state):
 
