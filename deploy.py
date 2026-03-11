@@ -133,7 +133,7 @@ def answer_node(state):
         {
             "role": "system",
             "content":
-            "You remember conversation history. Use it when answering. just use conversation history when you need answering the question like what is , what was , or what i asked use converstation history never answer only 'dont know' when you dont know the answer!"
+            "You remember conversation history. Use it when answering. just use conversation history when you need answering the question like what is , what was , or what i asked use converstation history never answer only 'dont know' when you dont know the answer! And also dont make unsusual expression only focus on what user provides and dont make strange answer like when use say something like tranformers or any name of the subject first look at the retrieval and then if you not found that then you can generate the answer and never explain in long paragraph unless user say you to explain in paragraph always use brief explanations!"
         }
     ]
 
@@ -172,7 +172,7 @@ def llm_node(state):
         {
             "role": "system",
             "content":
-            "You remember conversation history."
+            "You remember conversation history.And answer in a clear and focus on user prompt based on that answer!"
         }
     ]
 
